@@ -163,6 +163,7 @@ plt.xticks(rotation=45, ha="right")
 plt.grid(axis="y", linestyle="--", alpha=0.7)
 st.pyplot(fig)
 
+
 # --------------------------------------------------
 # Footer
 # --------------------------------------------------
