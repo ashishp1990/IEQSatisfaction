@@ -5,7 +5,7 @@ import joblib
 import matplotlib.pyplot as plt
 
 # --------------------------------------------------
-# Page config
+# Page configuration
 # --------------------------------------------------
 st.set_page_config(
     page_title="IEQ Satisfaction Prediction",
@@ -13,42 +13,7 @@ st.set_page_config(
 )
 
 # --------------------------------------------------
-# Light custom CSS (SAFE for Streamlit Cloud)
-# --------------------------------------------------
-st.markdown(
-    """
-    <style>
-        .main {
-            max-width: 1200px;
-            padding-left: 2rem;
-            padding-right: 2rem;
-        }
-        .block-container {
-            padding-top: 1.5rem;
-        }
-        .card {
-            background-color: #ffffff;
-            padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-            margin-bottom: 1.5rem;
-        }
-        .section-title {
-            font-size: 1.4rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
-        }
-        .muted {
-            color: #6c757d;
-            font-size: 0.9rem;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# --------------------------------------------------
-# Load artifacts
+# Load trained artifacts
 # --------------------------------------------------
 artifact = joblib.load("ieq_models.joblib")
 
@@ -62,8 +27,8 @@ results_df = artifact["metrics"]
 # --------------------------------------------------
 st.title("🏫 Indoor Environmental Quality (IEQ) Satisfaction Prediction")
 st.markdown(
-    "<p class='muted'>An interactive machine learning application for predicting classroom IEQ satisfaction.</p>",
-    unsafe_allow_html=True
+    "Predict **IEQ Satisfaction** using classroom conditions. "
+    "The model outputs the **probability of being satisfied**."
 )
 
 # --------------------------------------------------
@@ -72,19 +37,19 @@ st.markdown(
 st.sidebar.header("⚙️ Application Settings")
 
 model_name = st.sidebar.selectbox(
-    "Prediction Model",
+    "Select Prediction Model",
     list(models.keys()),
     index=list(models.keys()).index("Random Forest")
 )
 model = models[model_name]
 
 input_mode = st.sidebar.radio(
-    "Input Method",
-    ["📂 CSV Upload (Recommended)", "🔢 Manual Input (Demo)"]
+    "Choose Input Method",
+    ["📂 CSV Upload (Recommended)", "🔢 Manual Input"]
 )
 
 # --------------------------------------------------
-# Feature builder
+# Feature builder (mean-based, correct)
 # --------------------------------------------------
 def build_features_from_inputs(students, temperature, season, windows, noise, lighting):
     X = pd.DataFrame(
@@ -122,15 +87,10 @@ def build_features_from_inputs(students, temperature, season, windows, noise, li
     return X
 
 # --------------------------------------------------
-# INPUT SECTION
+# CSV Upload Mode
 # --------------------------------------------------
 if input_mode == "📂 CSV Upload (Recommended)":
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title'>📂 CSV Upload Prediction</div>", unsafe_allow_html=True)
-    st.markdown(
-        "<p class='muted'>Download the template, fill classroom data, and upload for batch prediction.</p>",
-        unsafe_allow_html=True
-    )
+    st.header("📂 CSV Upload Prediction")
 
     template_df = pd.DataFrame({
         "Students": [45],
@@ -151,7 +111,7 @@ if input_mode == "📂 CSV Upload (Recommended)":
 
     if uploaded:
         user_df = pd.read_csv(uploaded)
-        results = []
+        output_rows = []
 
         for _, row in user_df.iterrows():
             X = build_features_from_inputs(
@@ -164,31 +124,24 @@ if input_mode == "📂 CSV Upload (Recommended)":
             )
 
             X_scaled = scaler.transform(X)
-            pred = model.predict(X_scaled)[0]
-            prob = model.predict_proba(X_scaled)[0][1]
+            prob_sat = model.predict_proba(X_scaled)[0][1]
 
-            results.append({
+            prediction = "Satisfied" if prob_sat >= 0.5 else "Not Satisfied"
+
+            output_rows.append({
                 **row.to_dict(),
-                "Prediction": "Satisfied" if pred == 1 else "Not Satisfied",
-                "Confidence": round(prob if pred == 1 else 1 - prob, 3)
+                "Prediction": prediction,
+                "Probability_of_Satisfaction (%)": round(prob_sat * 100, 2)
             })
 
-        st.markdown("<div class='section-title'>📊 Prediction Results</div>", unsafe_allow_html=True)
-        st.dataframe(pd.DataFrame(results))
-
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.subheader("📊 Prediction Results")
+        st.dataframe(pd.DataFrame(output_rows))
 
 # --------------------------------------------------
-# MANUAL INPUT
+# Manual Input Mode
 # --------------------------------------------------
 else:
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title'>🔢 Manual Input (Demonstration)</div>", unsafe_allow_html=True)
-    st.markdown(
-        "<p class='muted'>This mode is for interactive demonstration. "
-        "Internally, remaining features are auto-filled using training statistics.</p>",
-        unsafe_allow_html=True
-    )
+    st.header("🔢 Manual Input Prediction")
 
     c1, c2, c3 = st.columns(3)
 
@@ -204,31 +157,30 @@ else:
         noise = st.selectbox("Noise Level", ["Low", "Medium", "High"])
         lighting = st.selectbox("Lighting Quality", ["Poor", "Average", "Good"])
 
-    if st.button("🔍 Predict IEQ Satisfaction"):
+    if st.button("Predict IEQ Satisfaction"):
         X = build_features_from_inputs(
             students, temperature, season, windows, noise, lighting
         )
         X_scaled = scaler.transform(X)
-        pred = model.predict(X_scaled)[0]
-        prob = model.predict_proba(X_scaled)[0][1]
+        prob_sat = model.predict_proba(X_scaled)[0][1]
 
-        if pred == 1:
-            st.success(f"✅ **Satisfied** (Confidence: {prob:.2f})")
+        if prob_sat >= 0.5:
+            st.success(
+                f"✅ Satisfied — Probability of Satisfaction: {prob_sat*100:.2f}%"
+            )
         else:
-            st.error(f"❌ **Not Satisfied** (Confidence: {1 - prob:.2f})")
-
-    st.markdown("</div>", unsafe_allow_html=True)
+            st.error(
+                f"❌ Not Satisfied — Probability of Satisfaction: {prob_sat*100:.2f}%"
+            )
 
 # --------------------------------------------------
-# METRICS
+# Model Metrics
 # --------------------------------------------------
-st.markdown("<div class='card'>", unsafe_allow_html=True)
-st.markdown("<div class='section-title'>📊 Model Performance Metrics</div>", unsafe_allow_html=True)
+st.header("📊 Model Performance Metrics")
 st.dataframe(results_df.style.format("{:.3f}"))
-st.markdown("</div>", unsafe_allow_html=True)
 
 # --------------------------------------------------
-# FOOTER
+# Footer
 # --------------------------------------------------
 st.markdown("---")
-st.caption("ML Assignment 2 | IEQ Satisfaction Prediction | Streamlit Application")
+st.caption("ML Assignment 2 | IEQ Satisfaction Prediction | Streamlit App")
