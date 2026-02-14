@@ -151,7 +151,7 @@ else:
 
     with c1:
         students = st.number_input("Number of Students", 10, 200, 40)
-        temperature = st.slider("Average Temperature (°C)", 15, 60, 26)
+        temperature = st.slider("Average Temperature (°C)", 15, 65, 26)
 
     with c2:
         season = st.selectbox("Season", ["Summer", "Winter", "Rainy", "Autumn"])
