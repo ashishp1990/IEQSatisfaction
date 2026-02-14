@@ -4,10 +4,8 @@ import numpy as np
 import joblib
 import matplotlib.pyplot as plt
 
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-
 # --------------------------------------------------
-# Page config
+# Page configuration
 # --------------------------------------------------
 st.set_page_config(
     page_title="IEQ Satisfaction Prediction",
@@ -23,28 +21,29 @@ models = artifact["models"]
 scaler = artifact["scaler"]
 feature_names = artifact["feature_names"]
 results_df = artifact["metrics"]
+feature_means = artifact["feature_means"]  # <<< CRITICAL FIX
 
 # --------------------------------------------------
-# App title & description
+# App Header
 # --------------------------------------------------
-st.title("Indoor Environmental Quality (IEQ) Satisfaction Prediction")
+st.title("🏫 Indoor Environmental Quality (IEQ) Satisfaction Prediction")
 
 st.markdown("""
 This application predicts **Indoor Environmental Quality (IEQ) Satisfaction**
-based on classroom environmental and contextual features.
+based on classroom conditions.
 
-**Target:**
-- `1` → Satisfied  
-- `0` → Not Satisfied
+✔ Human-friendly inputs  
+✔ Internally mapped to full ML feature space  
+✔ Trained ensemble models
 """)
 
 # --------------------------------------------------
-# Sidebar controls
+# Sidebar – Model Selection
 # --------------------------------------------------
-st.sidebar.header("Model Selection")
+st.sidebar.header("⚙️ Model Selection")
 
 model_name = st.sidebar.selectbox(
-    "Choose a model",
+    "Select Model",
     list(models.keys()),
     index=list(models.keys()).index("Random Forest")
 )
@@ -52,80 +51,106 @@ model_name = st.sidebar.selectbox(
 model = models[model_name]
 
 # --------------------------------------------------
-# Section 1: User Input Prediction
+# User Inputs (CLEAN & LIMITED)
 # --------------------------------------------------
-st.header("🔢 Manual Input Prediction")
+st.header("📝 Classroom Information")
 
-st.markdown("Enter feature values to predict IEQ Satisfaction.")
+c1, c2, c3 = st.columns(3)
 
-user_input = {}
-cols = st.columns(3)
+with c1:
+    students = st.number_input("Number of Students", 10, 200, 40)
+    temperature = st.slider("Average Room Temperature (°C)", 15, 40, 26)
 
-for i, feature in enumerate(feature_names):
-    with cols[i % 3]:
-        user_input[feature] = st.number_input(
-            feature,
-            value=0.0
-        )
+with c2:
+    season = st.selectbox("Season", ["Summer", "Winter", "Rainy", "Autumn"])
+    windows = st.slider("Number of Windows Open", 0, 10, 2)
 
-input_df = pd.DataFrame([user_input])
+with c3:
+    noise = st.selectbox("Noise Level", ["Low", "Medium", "High"])
+    lighting = st.selectbox("Lighting Quality", ["Poor", "Average", "Good"])
 
-if st.button("Predict Satisfaction"):
+# --------------------------------------------------
+# Feature Builder (FIXED – MEAN INITIALIZATION)
+# --------------------------------------------------
+def build_feature_vector():
+    # Start from TRAINING MEANS (CRITICAL)
+    X = pd.DataFrame(
+        feature_means.values.reshape(1, -1),
+        columns=feature_means.index
+    )
+
+    # ---- Students ----
+    if "Student" in X.columns:
+        X["Student"] = students
+
+    # ---- Temperature ----
+    for col in ["Temp_Back", "Temp_Middle", "Temp_Front", "Trm"]:
+        if col in X.columns:
+            X[col] = temperature
+
+    # ---- Season → Humidity ----
+    rh_map = {
+        "Summer": 60,
+        "Winter": 40,
+        "Rainy": 70,
+        "Autumn": 55
+    }
+    for col in ["RH_Back", "RH_Middle", "RH_Front"]:
+        if col in X.columns:
+            X[col] = rh_map[season]
+
+    # ---- CO2 estimation (based on students + ventilation) ----
+    co2_base = 420 + (students * 8) - (windows * 40)
+    co2_base = np.clip(co2_base, 400, 1200)
+
+    for col in ["CO2_Back", "CO2_Middle", "CO2_Front"]:
+        if col in X.columns:
+            X[col] = co2_base
+
+    # ---- Noise ----
+    noise_map = {"Low": 40, "Medium": 55, "High": 70}
+    for col in ["SoundLevel_Back", "SoundLevel_Middle", "SoundLevel_Front"]:
+        if col in X.columns:
+            X[col] = noise_map[noise]
+
+    # ---- Lighting ----
+    lux_map = {"Poor": 150, "Average": 300, "Good": 600}
+    for col in ["LightLux_Back", "LightLux_Middle", "LightLux_Front"]:
+        if col in X.columns:
+            X[col] = lux_map[lighting]
+
+    return X
+
+# --------------------------------------------------
+# Prediction Section
+# --------------------------------------------------
+st.header("🔍 Prediction Result")
+
+if st.button("Predict IEQ Satisfaction"):
+    input_df = build_feature_vector()
     input_scaled = scaler.transform(input_df)
-    prediction = model.predict(input_scaled)[0]
-    probability = model.predict_proba(input_scaled)[0][1]
 
-    st.subheader("Prediction Result")
+    pred = model.predict(input_scaled)[0]
+    prob = model.predict_proba(input_scaled)[0][1]
 
-    if prediction == 1:
-        st.success(f"✅ Satisfied (Probability: {probability:.2f})")
+    if pred == 1:
+        st.success(f"✅ **Satisfied** (Confidence: {prob:.2f})")
     else:
-        st.error(f"❌ Not Satisfied (Probability: {1 - probability:.2f})")
+        st.error(f"❌ **Not Satisfied** (Confidence: {1 - prob:.2f})")
 
 # --------------------------------------------------
-# Section 2: CSV Upload Prediction
-# --------------------------------------------------
-st.header("📂 CSV Upload Prediction")
-
-uploaded_file = st.file_uploader(
-    "Upload CSV file (test data only)",
-    type=["csv"]
-)
-
-if uploaded_file is not None:
-    test_df = pd.read_csv(uploaded_file)
-
-    st.write("Uploaded Data Preview:")
-    st.dataframe(test_df.head())
-
-    # Ensure correct feature order
-    test_df = test_df[feature_names]
-
-    test_scaled = scaler.transform(test_df)
-    preds = model.predict(test_scaled)
-    probs = model.predict_proba(test_scaled)[:, 1]
-
-    output_df = test_df.copy()
-    output_df["Prediction"] = preds
-    output_df["Probability"] = probs
-
-    st.subheader("Prediction Results")
-    st.dataframe(output_df)
-
-# --------------------------------------------------
-# Section 3: Model Metrics Table
+# Model Performance Table
 # --------------------------------------------------
 st.header("📊 Model Performance Metrics")
-
 st.dataframe(results_df.style.format("{:.3f}"))
 
 # --------------------------------------------------
-# Section 4: Bar Chart Visualization
+# Bar Chart Visualization
 # --------------------------------------------------
-st.header("📈 Model Comparison (Bar Charts)")
+st.header("📈 Model Comparison")
 
 metric_selected = st.selectbox(
-    "Select metric",
+    "Select Metric",
     ["Accuracy", "AUC", "Precision", "Recall", "F1", "MCC"]
 )
 
@@ -139,27 +164,7 @@ plt.grid(axis="y", linestyle="--", alpha=0.7)
 st.pyplot(fig)
 
 # --------------------------------------------------
-# Section 5: Confusion Matrix
+# Footer
 # --------------------------------------------------
-st.header("🧩 Confusion Matrix")
-
-# Use test set metrics from training (best practice)
-# Assumes Random Forest as reference for confusion matrix
-reference_model = models["Random Forest"]
-
-y_true = artifact.get("y_test", None)
-X_test_ref = artifact.get("X_test", None)
-
-if y_true is not None and X_test_ref is not None:
-    y_pred_ref = reference_model.predict(X_test_ref)
-
-    cm = confusion_matrix(y_true, y_pred_ref)
-    fig_cm, ax_cm = plt.subplots()
-    disp = ConfusionMatrixDisplay(cm)
-    disp.plot(ax=ax_cm)
-    st.pyplot(fig_cm)
-else:
-    st.info(
-        "Confusion matrix uses training test data. "
-        "To enable it, store X_test and y_test in the artifact."
-    )
+st.markdown("---")
+st.caption("ML Assignment-2 | IEQ Satisfaction Prediction | Streamlit Application")
