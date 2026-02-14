@@ -30,10 +30,8 @@ st.markdown(
     """
 This application predicts **IEQ Satisfaction**.
 
-- The model outputs **Probability of Satisfaction**
-- Prediction rule:
-  - **Satisfied** if probability ≥ 50%
-  - **Not Satisfied** otherwise
+- Prediction is based on **probability of satisfaction**
+- A threshold of **50%** is used for classification
 """
 )
 
@@ -42,20 +40,29 @@ This application predicts **IEQ Satisfaction**.
 # --------------------------------------------------
 st.sidebar.header("⚙️ Application Settings")
 
-model_name = st.sidebar.selectbox(
-    "Select Model",
-    list(models.keys()),
-    index=list(models.keys()).index("Random Forest")
-)
-model = models[model_name]
-
 input_mode = st.sidebar.radio(
     "Input Method",
     ["CSV Upload (Recommended)", "Manual Input"]
 )
 
+# Model selection logic
+if input_mode == "Manual Input":
+    model_name = "Random Forest"
+    st.sidebar.info(
+        "ℹ️ Random Forest is used for Manual Input as it is "
+        "more robust to inferred features."
+    )
+else:
+    model_name = st.sidebar.selectbox(
+        "Select Model",
+        list(models.keys()),
+        index=list(models.keys()).index("XGBoost")
+    )
+
+model = models[model_name]
+
 # --------------------------------------------------
-# Feature builder (mean-based, stable)
+# Feature builder
 # --------------------------------------------------
 def build_features(students, temperature, season, windows, noise, lighting):
     X = pd.DataFrame(
@@ -135,7 +142,7 @@ if input_mode == "CSV Upload (Recommended)":
             output.append({
                 **row.to_dict(),
                 "Prediction": "Satisfied" if prob >= 0.5 else "Not Satisfied",
-                "Probability_of_Satisfaction (%)": round(prob * 100, 2)
+                "Probability of Satisfaction (%)": round(prob * 100, 2)
             })
 
         st.subheader("📊 Prediction Results")
@@ -147,15 +154,20 @@ if input_mode == "CSV Upload (Recommended)":
 else:
     st.header("🔢 Manual Input Prediction")
 
+    st.info(
+        "Manual input uses inferred features. "
+        "Random Forest is applied for stable predictions."
+    )
+
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        students = st.number_input("Number of Students", 10, 200, 40)
-        temperature = st.slider("Average Temperature (°C)", 15, 65, 26)
+        students = st.number_input("Number of Students", 10, 80, 40)
+        temperature = st.slider("Average Temperature (°C)", 18, 32, 26)
 
     with c2:
         season = st.selectbox("Season", ["Summer", "Winter", "Rainy", "Autumn"])
-        windows = st.slider("Windows Open", 0, 10, 2)
+        windows = st.slider("Windows Open", 0, 8, 2)
 
     with c3:
         noise = st.selectbox("Noise Level", ["Low", "Medium", "High"])
@@ -178,7 +190,7 @@ else:
                 f"❌ Not Satisfied\n\nProbability of Satisfaction: **{prob*100:.2f}%**"
             )
 
-# -------------------------------------------------
+# --------------------------------------------------
 # Metrics
 # --------------------------------------------------
 st.header("📊 Model Performance Metrics")
@@ -188,4 +200,4 @@ st.dataframe(results_df.style.format("{:.3f}"))
 # Footer
 # --------------------------------------------------
 st.markdown("---")
-st.caption("ML Assignment 2 | IEQ Satisfaction Prediction | Streamlit App")
+st.caption("ML Assignment 2 | IEQ Satisfaction Prediction | Streamlit Application")
