@@ -26,14 +26,13 @@ results_df = artifact["metrics"]
 # --------------------------------------------------
 st.title("🏫 Indoor Environmental Quality (IEQ) Satisfaction Prediction")
 
-st.markdown(
-    """
-This application predicts **IEQ Satisfaction**.
+st.markdown("""
+This application predicts **IEQ Satisfaction** using multiple machine learning models.
 
-- Prediction is based on **probability of satisfaction**
-- A threshold of **50%** is used for classification
-"""
-)
+- Output shown as **Probability of Satisfaction (%)**
+- Classification threshold: **50%**
+- Results from **all models** can be compared
+""")
 
 # --------------------------------------------------
 # Sidebar
@@ -45,21 +44,10 @@ input_mode = st.sidebar.radio(
     ["CSV Upload (Recommended)", "Manual Input"]
 )
 
-# Model selection logic
-if input_mode == "Manual Input":
-    model_name = "Random Forest"
-    st.sidebar.info(
-        "ℹ️ Random Forest is used for Manual Input as it is "
-        "more robust to inferred features."
-    )
-else:
-    model_name = st.sidebar.selectbox(
-        "Select Model",
-        list(models.keys()),
-        index=list(models.keys()).index("XGBoost")
-    )
-
-model = models[model_name]
+selected_model_name = st.sidebar.selectbox(
+    "Primary Model (Highlighted Result)",
+    list(models.keys())
+)
 
 # --------------------------------------------------
 # Feature builder
@@ -100,7 +88,7 @@ def build_features(students, temperature, season, windows, noise, lighting):
     return X
 
 # --------------------------------------------------
-# CSV Upload Mode
+# CSV Upload Mode (selected model only)
 # --------------------------------------------------
 if input_mode == "CSV Upload (Recommended)":
     st.header("📂 CSV Upload Prediction")
@@ -126,6 +114,8 @@ if input_mode == "CSV Upload (Recommended)":
         user_df = pd.read_csv(uploaded)
         output = []
 
+        model = models[selected_model_name]
+
         for _, row in user_df.iterrows():
             X = build_features(
                 row["Students"],
@@ -141,6 +131,7 @@ if input_mode == "CSV Upload (Recommended)":
 
             output.append({
                 **row.to_dict(),
+                "Model": selected_model_name,
                 "Prediction": "Satisfied" if prob >= 0.5 else "Not Satisfied",
                 "Probability of Satisfaction (%)": round(prob * 100, 2)
             })
@@ -149,14 +140,14 @@ if input_mode == "CSV Upload (Recommended)":
         st.dataframe(pd.DataFrame(output))
 
 # --------------------------------------------------
-# Manual Input Mode
+# Manual Input Mode (ALL MODELS)
 # --------------------------------------------------
 else:
     st.header("🔢 Manual Input Prediction")
 
     st.info(
-        "Manual input uses inferred features. "
-        "Random Forest is applied for stable predictions."
+        "The selected model result is highlighted below. "
+        "Predictions from all trained models are also shown for comparison."
     )
 
     c1, c2, c3 = st.columns(3)
@@ -177,23 +168,41 @@ else:
         X = build_features(
             students, temperature, season, windows, noise, lighting
         )
-
         X_scaled = scaler.transform(X)
-        prob = model.predict_proba(X_scaled)[0][1]
 
-        if prob >= 0.5:
+        # --- Selected model (highlighted) ---
+        primary_model = models[selected_model_name]
+        primary_prob = primary_model.predict_proba(X_scaled)[0][1]
+
+        if primary_prob >= 0.5:
             st.success(
-                f"✅ Satisfied\n\nProbability of Satisfaction: **{prob*100:.2f}%**"
+                f"✅ **{selected_model_name}** predicts **Satisfied**\n\n"
+                f"Probability of Satisfaction: **{primary_prob*100:.2f}%**"
             )
         else:
             st.error(
-                f"❌ Not Satisfied\n\nProbability of Satisfaction: **{prob*100:.2f}%**"
+                f"❌ **{selected_model_name}** predicts **Not Satisfied**\n\n"
+                f"Probability of Satisfaction: **{primary_prob*100:.2f}%**"
             )
 
+        # --- All models comparison ---
+        comparison = []
+
+        for name, mdl in models.items():
+            prob = mdl.predict_proba(X_scaled)[0][1]
+            comparison.append({
+                "Model": name,
+                "Prediction": "Satisfied" if prob >= 0.5 else "Not Satisfied",
+                "Probability of Satisfaction (%)": round(prob * 100, 2)
+            })
+
+        st.subheader("📊 All Models Prediction Comparison")
+        st.dataframe(pd.DataFrame(comparison))
+
 # --------------------------------------------------
-# Metrics
+# Model Performance Metrics
 # --------------------------------------------------
-st.header("📊 Model Performance Metrics")
+st.header("📈 Model Performance (Test Data)")
 st.dataframe(results_df.style.format("{:.3f}"))
 
 # --------------------------------------------------
