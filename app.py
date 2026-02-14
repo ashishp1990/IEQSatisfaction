@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import matplotlib.pyplot as plt
 
 # --------------------------------------------------
 # Page configuration
@@ -26,9 +25,16 @@ results_df = artifact["metrics"]
 # Header
 # --------------------------------------------------
 st.title("🏫 Indoor Environmental Quality (IEQ) Satisfaction Prediction")
+
 st.markdown(
-    "Predict **IEQ Satisfaction** using classroom conditions. "
-    "The model outputs the **probability of being satisfied**."
+    """
+This application predicts **IEQ Satisfaction**.
+
+- The model outputs **Probability of Satisfaction**
+- Prediction rule:
+  - **Satisfied** if probability ≥ 50%
+  - **Not Satisfied** otherwise
+"""
 )
 
 # --------------------------------------------------
@@ -37,21 +43,21 @@ st.markdown(
 st.sidebar.header("⚙️ Application Settings")
 
 model_name = st.sidebar.selectbox(
-    "Select Prediction Model",
+    "Select Model",
     list(models.keys()),
     index=list(models.keys()).index("Random Forest")
 )
 model = models[model_name]
 
 input_mode = st.sidebar.radio(
-    "Choose Input Method",
-    ["📂 CSV Upload (Recommended)", "🔢 Manual Input"]
+    "Input Method",
+    ["CSV Upload (Recommended)", "Manual Input"]
 )
 
 # --------------------------------------------------
-# Feature builder (mean-based, correct)
+# Feature builder (mean-based, stable)
 # --------------------------------------------------
-def build_features_from_inputs(students, temperature, season, windows, noise, lighting):
+def build_features(students, temperature, season, windows, noise, lighting):
     X = pd.DataFrame(
         feature_means.values.reshape(1, -1),
         columns=feature_means.index
@@ -89,7 +95,7 @@ def build_features_from_inputs(students, temperature, season, windows, noise, li
 # --------------------------------------------------
 # CSV Upload Mode
 # --------------------------------------------------
-if input_mode == "📂 CSV Upload (Recommended)":
+if input_mode == "CSV Upload (Recommended)":
     st.header("📂 CSV Upload Prediction")
 
     template_df = pd.DataFrame({
@@ -111,10 +117,10 @@ if input_mode == "📂 CSV Upload (Recommended)":
 
     if uploaded:
         user_df = pd.read_csv(uploaded)
-        output_rows = []
+        output = []
 
         for _, row in user_df.iterrows():
-            X = build_features_from_inputs(
+            X = build_features(
                 row["Students"],
                 row["Temperature"],
                 row["Season"],
@@ -124,18 +130,16 @@ if input_mode == "📂 CSV Upload (Recommended)":
             )
 
             X_scaled = scaler.transform(X)
-            prob_sat = model.predict_proba(X_scaled)[0][1]
+            prob = model.predict_proba(X_scaled)[0][1]
 
-            prediction = "Satisfied" if prob_sat >= 0.5 else "Not Satisfied"
-
-            output_rows.append({
+            output.append({
                 **row.to_dict(),
-                "Prediction": prediction,
-                "Probability_of_Satisfaction (%)": round(prob_sat * 100, 2)
+                "Prediction": "Satisfied" if prob >= 0.5 else "Not Satisfied",
+                "Probability_of_Satisfaction (%)": round(prob * 100, 2)
             })
 
         st.subheader("📊 Prediction Results")
-        st.dataframe(pd.DataFrame(output_rows))
+        st.dataframe(pd.DataFrame(output))
 
 # --------------------------------------------------
 # Manual Input Mode
@@ -147,7 +151,7 @@ else:
 
     with c1:
         students = st.number_input("Number of Students", 10, 200, 40)
-        temperature = st.slider("Average Temperature (°C)", 15, 40, 26)
+        temperature = st.slider("Average Temperature (°C)", 15, 60, 26)
 
     with c2:
         season = st.selectbox("Season", ["Summer", "Winter", "Rainy", "Autumn"])
@@ -158,23 +162,24 @@ else:
         lighting = st.selectbox("Lighting Quality", ["Poor", "Average", "Good"])
 
     if st.button("Predict IEQ Satisfaction"):
-        X = build_features_from_inputs(
+        X = build_features(
             students, temperature, season, windows, noise, lighting
         )
-        X_scaled = scaler.transform(X)
-        prob_sat = model.predict_proba(X_scaled)[0][1]
 
-        if prob_sat >= 0.5:
+        X_scaled = scaler.transform(X)
+        prob = model.predict_proba(X_scaled)[0][1]
+
+        if prob >= 0.5:
             st.success(
-                f"✅ Satisfied — Probability of Satisfaction: {prob_sat*100:.2f}%"
+                f"✅ Satisfied\n\nProbability of Satisfaction: **{prob*100:.2f}%**"
             )
         else:
             st.error(
-                f"❌ Not Satisfied — Probability of Satisfaction: {prob_sat*100:.2f}%"
+                f"❌ Not Satisfied\n\nProbability of Satisfaction: **{prob*100:.2f}%**"
             )
 
 # --------------------------------------------------
-# Model Metrics
+# Metrics
 # --------------------------------------------------
 st.header("📊 Model Performance Metrics")
 st.dataframe(results_df.style.format("{:.3f}"))
