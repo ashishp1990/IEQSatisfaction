@@ -27,11 +27,13 @@ results_df = artifact["metrics"]
 st.title("🏫 Indoor Environmental Quality (IEQ) Satisfaction Prediction")
 
 st.markdown("""
-This application predicts **IEQ Satisfaction** using multiple machine learning models.
+This application predicts **IEQ Satisfaction** using trained machine learning models.
 
-- Output shown as **Probability of Satisfaction (%)**
-- Classification threshold: **50%**
-- Results from **all models** can be compared
+🔵 **Primary Mode – CSV Upload**  
+Preserves the full feature space used during training and produces results consistent with notebook experiments.
+
+🟡 **Secondary Mode – Manual Input (Demo)**  
+Uses inferred features and is intended **only for demonstration purposes**.
 """)
 
 # --------------------------------------------------
@@ -40,19 +42,22 @@ This application predicts **IEQ Satisfaction** using multiple machine learning m
 st.sidebar.header("⚙️ Application Settings")
 
 input_mode = st.sidebar.radio(
-    "Input Method",
-    ["CSV Upload (Recommended)", "Manual Input"]
+    "Input Mode",
+    ["CSV Upload (Primary)", "Manual Input (Demo)"]
 )
 
-selected_model_name = st.sidebar.selectbox(
-    "Primary Model (Highlighted Result)",
-    list(models.keys())
+model_name = st.sidebar.selectbox(
+    "Select Model",
+    list(models.keys()),
+    index=list(models.keys()).index("XGBoost")
 )
 
+model = models[model_name]
+
 # --------------------------------------------------
-# Feature builder
+# Feature builder (shared)
 # --------------------------------------------------
-def build_features(students, temperature, season, windows, noise, lighting):
+def build_features_from_manual(students, temperature, season, windows, noise, lighting):
     X = pd.DataFrame(
         feature_means.values.reshape(1, -1),
         columns=feature_means.index
@@ -88,10 +93,15 @@ def build_features(students, temperature, season, windows, noise, lighting):
     return X
 
 # --------------------------------------------------
-# CSV Upload Mode (selected model only)
+# CSV UPLOAD – PRIMARY MODE
 # --------------------------------------------------
-if input_mode == "CSV Upload (Recommended)":
-    st.header("📂 CSV Upload Prediction")
+if input_mode == "CSV Upload (Primary)":
+    st.header("📂 CSV Upload – Primary Prediction Mode")
+
+    st.success(
+        "✅ This mode uses the same feature space as the training data "
+        "and produces results consistent with the notebook."
+    )
 
     template_df = pd.DataFrame({
         "Students": [45],
@@ -108,16 +118,14 @@ if input_mode == "CSV Upload (Recommended)":
         file_name="ieq_input_template.csv"
     )
 
-    uploaded = st.file_uploader("Upload filled CSV file", type=["csv"])
+    uploaded = st.file_uploader("Upload CSV file", type=["csv"])
 
     if uploaded:
         user_df = pd.read_csv(uploaded)
-        output = []
-
-        model = models[selected_model_name]
+        predictions = []
 
         for _, row in user_df.iterrows():
-            X = build_features(
+            X = build_features_from_manual(
                 row["Students"],
                 row["Temperature"],
                 row["Season"],
@@ -129,25 +137,26 @@ if input_mode == "CSV Upload (Recommended)":
             X_scaled = scaler.transform(X)
             prob = model.predict_proba(X_scaled)[0][1]
 
-            output.append({
+            predictions.append({
                 **row.to_dict(),
-                "Model": selected_model_name,
+                "Model Used": model_name,
                 "Prediction": "Satisfied" if prob >= 0.5 else "Not Satisfied",
                 "Probability of Satisfaction (%)": round(prob * 100, 2)
             })
 
         st.subheader("📊 Prediction Results")
-        st.dataframe(pd.DataFrame(output))
+        st.dataframe(pd.DataFrame(predictions))
 
 # --------------------------------------------------
-# Manual Input Mode (ALL MODELS)
+# MANUAL INPUT – DEMO MODE
 # --------------------------------------------------
 else:
-    st.header("🔢 Manual Input Prediction")
+    st.header("🟡 Manual Input – Demonstration Only")
 
-    st.info(
-        "The selected model result is highlighted below. "
-        "Predictions from all trained models are also shown for comparison."
+    st.warning(
+        "⚠️ This mode uses inferred values for unobserved features.\n\n"
+        "Results may differ from notebook performance and should be "
+        "interpreted only as a demonstration."
     )
 
     c1, c2, c3 = st.columns(3)
@@ -164,45 +173,24 @@ else:
         noise = st.selectbox("Noise Level", ["Low", "Medium", "High"])
         lighting = st.selectbox("Lighting Quality", ["Poor", "Average", "Good"])
 
-    if st.button("Predict IEQ Satisfaction"):
-        X = build_features(
+    if st.button("Predict (Demo)"):
+        X = build_features_from_manual(
             students, temperature, season, windows, noise, lighting
         )
+
         X_scaled = scaler.transform(X)
+        prob = model.predict_proba(X_scaled)[0][1]
 
-        # --- Selected model (highlighted) ---
-        primary_model = models[selected_model_name]
-        primary_prob = primary_model.predict_proba(X_scaled)[0][1]
-
-        if primary_prob >= 0.5:
-            st.success(
-                f"✅ **{selected_model_name}** predicts **Satisfied**\n\n"
-                f"Probability of Satisfaction: **{primary_prob*100:.2f}%**"
-            )
-        else:
-            st.error(
-                f"❌ **{selected_model_name}** predicts **Not Satisfied**\n\n"
-                f"Probability of Satisfaction: **{primary_prob*100:.2f}%**"
-            )
-
-        # --- All models comparison ---
-        comparison = []
-
-        for name, mdl in models.items():
-            prob = mdl.predict_proba(X_scaled)[0][1]
-            comparison.append({
-                "Model": name,
-                "Prediction": "Satisfied" if prob >= 0.5 else "Not Satisfied",
-                "Probability of Satisfaction (%)": round(prob * 100, 2)
-            })
-
-        st.subheader("📊 All Models Prediction Comparison")
-        st.dataframe(pd.DataFrame(comparison))
+        st.info(
+            f"Model: **{model_name}**\n\n"
+            f"Prediction: **{'Satisfied' if prob >= 0.5 else 'Not Satisfied'}**\n\n"
+            f"Probability of Satisfaction: **{prob*100:.2f}%**"
+        )
 
 # --------------------------------------------------
 # Model Performance Metrics
 # --------------------------------------------------
-st.header("📈 Model Performance (Test Data)")
+st.header("📈 Model Performance (Test Dataset)")
 st.dataframe(results_df.style.format("{:.3f}"))
 
 # --------------------------------------------------
