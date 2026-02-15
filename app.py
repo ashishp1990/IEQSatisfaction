@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # --------------------------------------------------
-# Load trained model artifact
+# Load model artifacts
 # --------------------------------------------------
 model_artifact = joblib.load("ieq_models.joblib")
 
@@ -21,13 +21,15 @@ scaler = model_artifact["scaler"]
 feature_means = model_artifact["feature_means"]
 results_df = model_artifact["metrics"]
 
+# 🔑 EXACT training feature order (CRITICAL)
+TRAINING_FEATURES = list(scaler.feature_names_in_)
+
 # --------------------------------------------------
-# Load conditional feature artifact
+# Load conditional / global feature means
 # --------------------------------------------------
 conditional_artifact = joblib.load("conditional_feature_means.joblib")
 
 global_means = conditional_artifact["global_means"]
-conditional_columns = conditional_artifact["conditional_columns"]
 
 TARGET_COLUMN = "IEQSatisfaction"
 
@@ -41,7 +43,8 @@ This application predicts **IEQ Satisfaction** using trained machine learning mo
 
 Users provide **high-level classroom inputs**.  
 The application reconstructs the **full sensor-level feature space** using
-**statistical averages derived from the training dataset**.
+**statistical averages derived from the training dataset**, ensuring consistency
+between training and deployment.
 """)
 
 # --------------------------------------------------
@@ -58,7 +61,7 @@ model_name = st.sidebar.selectbox(
 model = models[model_name]
 
 # --------------------------------------------------
-# Feature reconstruction logic (CORE)
+# Feature reconstruction logic (CORE FIX)
 # --------------------------------------------------
 def build_features_from_inputs(
     students,
@@ -68,22 +71,22 @@ def build_features_from_inputs(
     noise,
     lighting
 ):
-    # 1. Start with global numeric averages
+    # Start from global numeric means
     X = pd.DataFrame(
         global_means.values.reshape(1, -1),
         columns=global_means.index
     )
 
-    # 2. Override student count
+    # Student count
     if "Student" in X.columns:
         X["Student"] = students
 
-    # 3. Temperature mapping
+    # Temperature
     for col in ["Temp_Back", "Temp_Middle", "Temp_Front", "Trm"]:
         if col in X.columns:
             X[col] = temperature
 
-    # 4. Relative Humidity (rule-based, dataset-consistent)
+    # Relative humidity
     rh_map = {
         "Summer": 60,
         "Winter": 40,
@@ -94,29 +97,31 @@ def build_features_from_inputs(
         if col in X.columns:
             X[col] = rh_map.get(season, 55)
 
-    # 5. CO₂ estimation (occupancy driven)
-    co2_per_student = 8.0  # derived from training distribution
-    co2 = np.clip(students * co2_per_student, 400, 1500)
+    # CO₂ (occupancy-driven)
+    co2 = np.clip(students * 8.0, 400, 1500)
     for col in ["CO2_Back", "CO2_Middle", "CO2_Front"]:
         if col in X.columns:
             X[col] = co2
 
-    # 6. Noise level
+    # Noise
     noise_map = {"Low": 40, "Medium": 55, "High": 70}
     for col in ["SoundLevel_Back", "SoundLevel_Middle", "SoundLevel_Front"]:
         if col in X.columns:
             X[col] = noise_map[noise]
 
-    # 7. Lighting level
+    # Lighting
     lux_map = {"Poor": 150, "Average": 300, "Good": 600}
     for col in ["LightLux_Back", "LightLux_Middle", "LightLux_Front"]:
         if col in X.columns:
             X[col] = lux_map[lighting]
 
+    # 🔥 MOST IMPORTANT LINE – align with training schema
+    X = X.reindex(columns=TRAINING_FEATURES)
+
     return X
 
 # --------------------------------------------------
-# CSV UPLOAD MODE (PRIMARY – ASSIGNMENT SAFE)
+# CSV Upload Mode (Primary)
 # --------------------------------------------------
 st.header("📂 CSV Upload – Primary Prediction Mode")
 
@@ -164,7 +169,7 @@ if uploaded:
             "Probability of Satisfaction (%)": round(prob * 100, 2)
         }
 
-        # Actual target comparison (if available)
+        # Show actual target if present
         if TARGET_COLUMN in row:
             actual_target = 1 if row[TARGET_COLUMN] >= 4 else 0
             result["Actual Target"] = actual_target
@@ -178,7 +183,7 @@ if uploaded:
     st.dataframe(pd.DataFrame(predictions))
 
 # --------------------------------------------------
-# MODEL PERFORMANCE METRICS
+# Model Performance Metrics
 # --------------------------------------------------
 st.header("📈 Model Performance (Test Dataset)")
 st.dataframe(results_df.style.format("{:.3f}"))
