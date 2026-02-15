@@ -18,8 +18,8 @@ st.title("📊 IEQ Satisfaction Prediction System")
 
 st.markdown(
     """
-- You may **upload a CSV** or **enter values manually**
-- **IEQSatisfaction is predicted**, not required as input
+- Upload a CSV / Excel file **OR** enter values manually  
+- **IEQSatisfaction is predicted**, not required as input  
 """
 )
 
@@ -51,15 +51,6 @@ model_name = st.sidebar.selectbox(
 
 selected_model = models[model_name]
 
-st.sidebar.markdown(
-    """
-**Input Notes**
-- Upload a CSV with all features  
-- Or enter values manually  
-- IEQSatisfaction is optional and used only for comparison  
-"""
-)
-
 # =========================================================
 # Tabs
 # =========================================================
@@ -68,165 +59,142 @@ tab_input, tab_metrics = st.tabs(
 )
 
 # =========================================================
-# TAB 1 — Input & Prediction
+# TAB 1 — INPUT & PREDICTION
 # =========================================================
 with tab_input:
 
     # -----------------------------------------------------
-    # CSV Downloads
+    # Downloads
     # -----------------------------------------------------
-    st.subheader("📥 Download CSV Files")
+    st.subheader("📥 Download Input Files")
 
-    d1, d2, d3 = st.columns(3)
+    c1, c2, c3 = st.columns(3)
 
-    with d1:
-        with open("ieq_full_feature_template.csv", "rb") as f:
-            st.download_button(
-                "⬇️ CSV Template (Example Values)",
-                f,
-                "ieq_full_feature_template.csv",
-                mime="text/csv"
-            )
+    with c1:
+        st.download_button(
+            "⬇️ CSV Template",
+            open("ieq_full_feature_template.csv", "rb"),
+            file_name="ieq_full_feature_template.csv"
+        )
 
-    with d2:
-        with open("ieq_test_samples.csv", "rb") as f:
-            st.download_button(
-                "⬇️ Test Data Samples",
-                f,
-                "ieq_test_samples.csv",
-                mime="text/csv"
-            )
+    with c2:
+        st.download_button(
+            "⬇️ Test Data",
+            open("ieq_test_samples.csv", "rb"),
+            file_name="ieq_test_samples.csv"
+        )
 
-    with d3:
-        with open("ieq_satisfied_test_samples.csv", "rb") as f:
-            st.download_button(
-                "⬇️ Satisfied Samples",
-                f,
-                "ieq_satisfied_test_samples.csv",
-                mime="text/csv"
-            )
+    with c3:
+        st.download_button(
+            "⬇️ Satisfied Samples",
+            open("ieq_satisfied_test_samples.csv", "rb"),
+            file_name="ieq_satisfied_test_samples.csv"
+        )
 
     st.markdown("---")
 
     # -----------------------------------------------------
-    # Input Section
+    # Sub-tabs
     # -----------------------------------------------------
-    st.subheader("Input Data")
+    csv_tab, manual_tab = st.tabs(["📂 CSV Upload", "✍️ Manual Input"])
 
-    upload_col, manual_col = st.columns(2)
     input_df = None
     ground_truth = None
 
-    # ---------------- CSV Upload ----------------
-    with upload_col:
-        st.markdown("### 📂 Upload CSV")
-
+    # ================= CSV UPLOAD =================
+    with csv_tab:
         uploaded_file = st.file_uploader(
-            "Upload CSV file",
-            type=["csv"]
+            "Upload CSV or Excel",
+            type=["csv", "xlsx"]
         )
 
         if uploaded_file is not None:
-            input_df = pd.read_csv(uploaded_file)
-            st.success("CSV uploaded successfully")
+            input_df = (
+                pd.read_csv(uploaded_file)
+                if uploaded_file.name.endswith(".csv")
+                else pd.read_excel(uploaded_file)
+            )
+            st.success("File uploaded successfully")
             st.dataframe(input_df.head())
 
-    # ---------------- Manual Input ----------------
-    with manual_col:
-        st.markdown("### ✍️ Manual Input")
-
-        with st.form("manual_input_form"):
-            manual_data = {}
-
-            for col in FEATURE_COLUMNS:
-                manual_data[col] = st.number_input(
+    # ================= MANUAL INPUT =================
+    with manual_tab:
+        with st.form("manual_form"):
+            manual_data = {
+                col: st.number_input(
                     col,
                     value=float(feature_means[col])
                 )
+                for col in FEATURE_COLUMNS
+            }
+            submitted = st.form_submit_button("Predict")
 
-            submit_manual = st.form_submit_button("Predict")
-
-        if submit_manual:
+        if submitted:
             input_df = pd.DataFrame([manual_data])
 
-    # -----------------------------------------------------
-    # Prediction Logic
-    # -----------------------------------------------------
+    # =================================================
+    # Prediction Logic (FIXED)
+    # =================================================
     if input_df is not None:
 
-        st.subheader("🔮 Prediction Result")
-
-        # Extract ground truth if present
         if "IEQSatisfaction" in input_df.columns:
             ground_truth = input_df["IEQSatisfaction"]
             input_df = input_df.drop(columns=["IEQSatisfaction"])
 
-        # Align features
         input_df = input_df.reindex(columns=FEATURE_COLUMNS)
 
-        # Imputation (same as notebook)
         imputer = SimpleImputer(strategy="mean")
         imputer.fit(pd.DataFrame([feature_means]))
 
-        input_imputed = imputer.transform(input_df)
-        input_scaled = scaler.transform(input_imputed)
+        X = scaler.transform(imputer.transform(input_df))
 
-        # Prediction
-        probs = selected_model.predict_proba(input_scaled)[:, 1]
-        avg_prob = probs.mean()
-        label = "Satisfied" if avg_prob >= 0.5 else "Not Satisfied"
+        probs = selected_model.predict_proba(X)[:, 1]
+        labels = np.where(probs >= 0.5, "Satisfied", "Not Satisfied")
 
-        c1, c2 = st.columns(2)
+        st.markdown("---")
+        st.subheader("🔮 Prediction Result")
 
-        with c1:
+        # ========== SINGLE ROW ==========
+        if len(input_df) == 1:
             st.metric(
                 "Predicted IEQSatisfaction",
-                label
+                labels[0]
             )
-
-        with c2:
             st.metric(
                 "Prediction Probability",
-                f"{avg_prob * 100:.2f}%"
+                f"{probs[0] * 100:.2f}%"
             )
+
+        # ========== MULTIPLE ROWS ==========
+        else:
+            results_df = input_df.copy()
+            results_df["Predicted Label"] = labels
+            results_df["Probability (%)"] = (probs * 100).round(2)
+
+            st.dataframe(results_df)
+
+            st.markdown("### 📊 Summary")
+            st.write({
+                "Average Probability (%)": round(probs.mean() * 100, 2),
+                "Minimum Probability (%)": round(probs.min() * 100, 2),
+                "Maximum Probability (%)": round(probs.max() * 100, 2),
+            })
 
         if ground_truth is not None:
             st.markdown("### 🧪 Ground Truth Comparison")
-
-            compare_df = pd.DataFrame({
+            st.write(pd.DataFrame({
                 "Actual IEQSatisfaction": ground_truth,
-                "Predicted Label": label,
-                "Predicted Probability (%)": (probs * 100).round(2)
-            })
-
-            st.dataframe(compare_df)
+                "Predicted Label": labels,
+                "Probability (%)": (probs * 100).round(2)
+            }))
 
 # =========================================================
-# TAB 2 — Model Performance
+# TAB 2 — MODEL PERFORMANCE
 # =========================================================
 with tab_metrics:
-
-    st.subheader("📈 Model Performance (Test Dataset)")
     st.dataframe(metrics_df)
 
-    st.markdown("### Accuracy")
     st.bar_chart(metrics_df.set_index("Model")["Accuracy"])
-
-    st.markdown("### AUC Score")
     st.bar_chart(metrics_df.set_index("Model")["AUC"])
-
-    st.markdown("### Precision / Recall / F1")
-    st.bar_chart(
-        metrics_df.set_index("Model")[["Precision", "Recall", "F1"]]
-    )
-
-    st.markdown("### MCC Score")
+    st.bar_chart(metrics_df.set_index("Model")[["Precision", "Recall", "F1"]])
     st.bar_chart(metrics_df.set_index("Model")["MCC"])
-
-# =========================================================
-# Footer
-# =========================================================
-st.markdown("---")
-st.caption(
-    "IEQ Satisfaction Prediction • ML Assignment • Streamlit Application"
-)
