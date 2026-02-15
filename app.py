@@ -4,15 +4,16 @@ import numpy as np
 import joblib
 
 # --------------------------------------------------
-# Page configuration
+# Page Configuration
 # --------------------------------------------------
 st.set_page_config(
     page_title="IEQ Satisfaction Prediction",
+    page_icon="🏫",
     layout="wide"
 )
 
 # --------------------------------------------------
-# Load model artifacts
+# Load Model Artifacts
 # --------------------------------------------------
 model_artifact = joblib.load("ieq_models.joblib")
 
@@ -25,43 +26,52 @@ results_df = model_artifact["metrics"]
 TRAINING_FEATURES = list(scaler.feature_names_in_)
 
 # --------------------------------------------------
-# Load conditional / global feature means
+# Load Conditional / Global Feature Means
 # --------------------------------------------------
 conditional_artifact = joblib.load("conditional_feature_means.joblib")
-
 global_means = conditional_artifact["global_means"]
 
 TARGET_COLUMN = "IEQSatisfaction"
 
 # --------------------------------------------------
-# Header
+# Header Section
 # --------------------------------------------------
-st.title("🏫 Indoor Environmental Quality (IEQ) Satisfaction Prediction")
+st.markdown(
+    """
+    <h1 style="text-align:center;">🏫 IEQ Satisfaction Prediction System</h1>
+    <p style="text-align:center; font-size:16px;">
+    Predict indoor environmental satisfaction using trained machine learning models
+    </p>
+    """,
+    unsafe_allow_html=True
+)
 
-st.markdown("""
-This application predicts **IEQ Satisfaction** using trained machine learning models.
-
-Users provide **high-level classroom inputs**.  
-The application reconstructs the **full sensor-level feature space** using
-**statistical averages derived from the training dataset**, ensuring consistency
-between training and deployment.
-""")
+st.markdown("---")
 
 # --------------------------------------------------
-# Sidebar
+# Sidebar – Model Selection
 # --------------------------------------------------
-st.sidebar.header("⚙️ Application Settings")
+st.sidebar.header("⚙️ Model Settings")
 
 model_name = st.sidebar.selectbox(
-    "Select Model",
+    "Select Classification Model",
     list(models.keys()),
     index=list(models.keys()).index("XGBoost")
 )
 
 model = models[model_name]
 
+st.sidebar.markdown(
+    """
+    **Input Note**
+    - Upload a CSV with classroom conditions  
+    - The app reconstructs sensor-level features internally  
+    - `IEQSatisfaction` is **optional** and used only for comparison
+    """
+)
+
 # --------------------------------------------------
-# Feature reconstruction logic (CORE FIX)
+# Feature Reconstruction Logic (CORE)
 # --------------------------------------------------
 def build_features_from_inputs(
     students,
@@ -71,7 +81,7 @@ def build_features_from_inputs(
     noise,
     lighting
 ):
-    # Start from global numeric means
+    # Start with global numeric averages
     X = pd.DataFrame(
         global_means.values.reshape(1, -1),
         columns=global_means.index
@@ -86,7 +96,7 @@ def build_features_from_inputs(
         if col in X.columns:
             X[col] = temperature
 
-    # Relative humidity
+    # Relative Humidity (season-based assumption)
     rh_map = {
         "Summer": 60,
         "Winter": 40,
@@ -115,24 +125,39 @@ def build_features_from_inputs(
         if col in X.columns:
             X[col] = lux_map[lighting]
 
-    # 🔥 MOST IMPORTANT LINE – align with training schema
+    # 🔑 Enforce training feature order
     X = X.reindex(columns=TRAINING_FEATURES)
 
     return X
 
 # --------------------------------------------------
-# CSV Upload Mode (Primary)
+# CSV Upload Section
 # --------------------------------------------------
-st.header("📂 CSV Upload – Primary Prediction Mode")
+st.header("📂 Upload Classroom Data (CSV)")
 
+st.markdown(
+    """
+    **Required Columns**
+    - Students
+    - Temperature
+    - Season
+    - Windows
+    - Noise
+    - Lighting
+
+    **Optional Column**
+    - IEQSatisfaction (used only for result comparison)
+    """
+)
+
+# ✅ CLEAN TEMPLATE (NO IEQSatisfaction)
 template_df = pd.DataFrame({
     "Students": [45],
     "Temperature": [26],
     "Season": ["Summer"],
     "Windows": [2],
     "Noise": ["Medium"],
-    "Lighting": ["Good"],
-    "IEQSatisfaction": [4]  # optional
+    "Lighting": ["Good"]
 })
 
 st.download_button(
@@ -141,8 +166,15 @@ st.download_button(
     file_name="ieq_input_template.csv"
 )
 
-uploaded = st.file_uploader("Upload CSV file", type=["csv"])
+uploaded = st.file_uploader(
+    "Upload CSV file",
+    type=["csv"],
+    help="CSV must follow the template structure"
+)
 
+# --------------------------------------------------
+# Prediction Logic
+# --------------------------------------------------
 if uploaded:
     user_df = pd.read_csv(uploaded)
     predictions = []
@@ -162,17 +194,22 @@ if uploaded:
         pred_target = 1 if prob >= 0.5 else 0
 
         result = {
-            **row.to_dict(),
+            "Students": row["Students"],
+            "Temperature": row["Temperature"],
+            "Season": row["Season"],
+            "Noise": row["Noise"],
+            "Lighting": row["Lighting"],
             "Model Used": model_name,
-            "Predicted Target": pred_target,
             "Predicted Label": "Satisfied" if pred_target == 1 else "Not Satisfied",
-            "Probability of Satisfaction (%)": round(prob * 100, 2)
+            "Probability (%)": round(prob * 100, 2)
         }
 
-        # Show actual target if present
-        if TARGET_COLUMN in row:
+        # Optional ground-truth comparison
+        if TARGET_COLUMN in user_df.columns:
             actual_target = 1 if row[TARGET_COLUMN] >= 4 else 0
-            result["Actual Target"] = actual_target
+            result["Actual Label"] = (
+                "Satisfied" if actual_target == 1 else "Not Satisfied"
+            )
             result["Correct Prediction"] = (
                 "Yes" if actual_target == pred_target else "No"
             )
@@ -180,16 +217,20 @@ if uploaded:
         predictions.append(result)
 
     st.subheader("📊 Prediction Results")
-    st.dataframe(pd.DataFrame(predictions))
+    st.dataframe(pd.DataFrame(predictions), use_container_width=True)
 
 # --------------------------------------------------
-# Model Performance Metrics
+# Model Performance Section
 # --------------------------------------------------
+st.markdown("---")
 st.header("📈 Model Performance (Test Dataset)")
-st.dataframe(results_df.style.format("{:.3f}"))
+st.dataframe(results_df.style.format("{:.3f}"), use_container_width=True)
 
 # --------------------------------------------------
 # Footer
 # --------------------------------------------------
 st.markdown("---")
-st.caption("ML Assignment 2 | IEQ Satisfaction Prediction | Streamlit Application")
+st.caption(
+    "ML Assignment 2 | IEQ Satisfaction Prediction | "
+    "Streamlit Deployment"
+)
