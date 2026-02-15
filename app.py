@@ -2,179 +2,204 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-from pathlib import Path
 
-# --------------------------------------------------
-# Page Configuration
-# --------------------------------------------------
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+
+# =========================================================
+# App Configuration
+# =========================================================
 st.set_page_config(
     page_title="IEQ Satisfaction Prediction",
-    page_icon="🏫",
+    page_icon="📊",
     layout="wide"
 )
 
-# --------------------------------------------------
-# Load Artifacts
-# --------------------------------------------------
-artifact = joblib.load("ieq_models.joblib")
-
-models = artifact["models"]
-scaler = artifact["scaler"]
-metrics_df = artifact["metrics"]
-
-FEATURE_COLUMNS = list(scaler.feature_names_in_)
-TARGET_COLUMN = "IEQSatisfaction"
-
-# --------------------------------------------------
-# Load Template & Test Samples
-# --------------------------------------------------
-TEMPLATE_PATH = Path("ieq_full_feature_template.csv")
-TEST_SAMPLE_PATH = Path("ieq_test_samples.csv")
-
-template_df = pd.read_csv(TEMPLATE_PATH)
-template_row = template_df.iloc[0].to_dict()
-
-# --------------------------------------------------
-# Header
-# --------------------------------------------------
+st.title("📊 IEQ Satisfaction Prediction System")
 st.markdown(
     """
-    <h1 style="text-align:center;">🏫 IEQ Satisfaction Prediction</h1>
-    <p style="text-align:center; font-size:16px;">
-    Full-feature prediction using trained machine learning models
-    </p>
-    """,
-    unsafe_allow_html=True
-)
-st.markdown("---")
+This application predicts **Indoor Environmental Quality (IEQ) Satisfaction**
+using multiple machine learning models trained on classroom environmental data.
 
-# --------------------------------------------------
-# Sidebar
-# --------------------------------------------------
-st.sidebar.header("⚙️ Settings")
+- You may **upload a CSV** or **enter values manually**
+- **IEQSatisfaction is predicted**, not required as input
+"""
+)
+
+# =========================================================
+# Load Trained Artifacts
+# =========================================================
+@st.cache_resource
+def load_artifacts():
+    artifact = joblib.load("ieq_models.joblib")
+    return (
+        artifact["models"],
+        artifact["scaler"],
+        artifact["feature_means"],
+        artifact["metrics"]
+    )
+
+models, scaler, feature_means, metrics_df = load_artifacts()
+
+FEATURE_COLUMNS = list(feature_means.index)
+
+# =========================================================
+# Sidebar — Model Selection
+# =========================================================
+st.sidebar.header("⚙️ Model Settings")
 
 model_name = st.sidebar.selectbox(
-    "Select Model",
-    list(models.keys()),
-    index=list(models.keys()).index("XGBoost")
+    "Select Classification Model",
+    list(models.keys())
 )
 
-model = models[model_name]
+selected_model = models[model_name]
 
-input_mode = st.sidebar.radio(
-    "Input Mode",
-    ["Manual Input (Form)", "CSV Upload"]
+st.sidebar.markdown(
+    """
+**Input Note**
+- Upload a CSV with all features  
+- Or enter values manually  
+- IEQSatisfaction is optional and used only for comparison
+"""
 )
 
-# --------------------------------------------------
-# MANUAL INPUT MODE
-# --------------------------------------------------
-if input_mode == "Manual Input (Form)":
-    st.header("✍️ Manual Feature Input")
+# =========================================================
+# Tabs
+# =========================================================
+tab_input, tab_metrics = st.tabs(["🔢 Input & Prediction", "📈 Model Performance"])
 
-    st.info(
-        "All fields are pre-filled with realistic example values. "
-        "You may modify any value before prediction."
-    )
+# =========================================================
+# TAB 1 — Input & Prediction
+# =========================================================
+with tab_input:
+    st.subheader("Input Data")
 
-    input_data = {}
+    upload_col, manual_col = st.columns(2)
 
-    with st.form("manual_input_form"):
-        cols = st.columns(3)
+    input_df = None
 
-        for i, col_name in enumerate(FEATURE_COLUMNS):
-            with cols[i % 3]:
-                default_value = float(template_row.get(col_name, 0.0))
-                input_data[col_name] = st.number_input(
-                    col_name,
-                    value=default_value,
-                    format="%.4f"
+    # -------------------------------
+    # CSV Upload
+    # -------------------------------
+    with upload_col:
+        st.markdown("### 📂 Upload CSV")
+
+        uploaded_file = st.file_uploader(
+            "Upload CSV file",
+            type=["csv"]
+        )
+
+        if uploaded_file is not None:
+            input_df = pd.read_csv(uploaded_file)
+
+            st.success("CSV uploaded successfully")
+            st.dataframe(input_df.head())
+
+    # -------------------------------
+    # Manual Input
+    # -------------------------------
+    with manual_col:
+        st.markdown("### ✍️ Manual Input")
+
+        with st.form("manual_input_form"):
+            manual_data = {}
+
+            for col in FEATURE_COLUMNS:
+                default_val = float(feature_means[col])
+                manual_data[col] = st.number_input(
+                    col,
+                    value=default_val
                 )
 
-        submitted = st.form_submit_button("🔮 Predict IEQ Satisfaction")
+            submit_manual = st.form_submit_button("Predict")
 
-    if submitted:
-        X = pd.DataFrame([input_data])
-        X_scaled = scaler.transform(X)
+        if submit_manual:
+            input_df = pd.DataFrame([manual_data])
 
-        prob = model.predict_proba(X_scaled)[0][1]
+    # -------------------------------
+    # Prediction Logic
+    # -------------------------------
+    if input_df is not None:
+        st.subheader("Prediction Result")
+
+        # Drop target column if user included it
+        if "IEQSatisfaction" in input_df.columns:
+            ground_truth = input_df["IEQSatisfaction"]
+            input_df = input_df.drop(columns=["IEQSatisfaction"])
+        else:
+            ground_truth = None
+
+        # Ensure correct feature order
+        input_df = input_df.reindex(columns=FEATURE_COLUMNS)
+
+        # Handle missing values
+        imputer = SimpleImputer(strategy="mean")
+        imputer.fit(pd.DataFrame([feature_means]))
+
+        input_imputed = imputer.transform(input_df)
+        input_scaled = scaler.transform(input_imputed)
+
+        # Prediction
+        prob = selected_model.predict_proba(input_scaled)[0][1]
         label = "Satisfied" if prob >= 0.5 else "Not Satisfied"
 
-        st.success(
-            f"""
-            **Predicted IEQSatisfaction:** {label}  
-            **Probability:** {prob*100:.2f}%
-            """
-        )
+        # Display
+        result_col, prob_col = st.columns(2)
 
-# --------------------------------------------------
-# CSV UPLOAD MODE
-# --------------------------------------------------
-else:
-    st.header("📂 Upload CSV (Full Feature Set)")
-
-    st.markdown(
-        """
-        **CSV Rules**
-        - Must contain **all feature columns**
-        - Must NOT contain `IEQSatisfaction`
-        - Column order does not matter
-        """
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.download_button(
-            "⬇️ Download CSV Template (With Example Values)",
-            template_df.to_csv(index=False),
-            file_name="ieq_full_feature_template.csv"
-        )
-
-    with col2:
-        if TEST_SAMPLE_PATH.exists():
-            st.download_button(
-                "⬇️ Download Test Samples (From Dataset)",
-                open(TEST_SAMPLE_PATH, "rb"),
-                file_name="ieq_test_samples.csv"
+        with result_col:
+            st.metric(
+                "Predicted IEQSatisfaction",
+                label
             )
 
-    uploaded = st.file_uploader("Upload CSV file", type=["csv"])
+        with prob_col:
+            st.metric(
+                "Prediction Probability",
+                f"{prob * 100:.2f}%"
+            )
 
-    if uploaded:
-        df = pd.read_csv(uploaded)
+        if ground_truth is not None:
+            st.markdown("### Ground Truth Comparison")
+            comparison_df = pd.DataFrame({
+                "Actual IEQSatisfaction": ground_truth,
+                "Predicted Label": [label] * len(input_df),
+                "Predicted Probability (%)": [(prob * 100).round(2)]
+            })
+            st.dataframe(comparison_df)
 
-        # Validation
-        missing = set(FEATURE_COLUMNS) - set(df.columns)
-        extra = set(df.columns) - set(FEATURE_COLUMNS)
+# =========================================================
+# TAB 2 — Model Performance
+# =========================================================
+with tab_metrics:
+    st.subheader("📈 Model Performance (Test Dataset)")
 
-        if missing:
-            st.error(f"❌ Missing columns: {sorted(missing)}")
-        elif extra:
-            st.error(f"❌ Unexpected columns: {sorted(extra)}")
-        else:
-            X = df[FEATURE_COLUMNS]
-            X_scaled = scaler.transform(X)
+    st.dataframe(metrics_df)
 
-            probs = model.predict_proba(X_scaled)[:, 1]
-            preds = np.where(probs >= 0.5, "Satisfied", "Not Satisfied")
+    st.markdown("### Accuracy Comparison")
+    st.bar_chart(
+        metrics_df.set_index("Model")["Accuracy"]
+    )
 
-            result_df = df.copy()
-            result_df["Predicted IEQSatisfaction"] = preds
-            result_df["Probability (%)"] = (probs * 100).round(2)
+    st.markdown("### AUC Comparison")
+    st.bar_chart(
+        metrics_df.set_index("Model")["AUC"]
+    )
 
-            st.subheader("📊 Prediction Results")
-            st.dataframe(result_df, use_container_width=True)
+    st.markdown("### Precision / Recall / F1")
+    st.bar_chart(
+        metrics_df.set_index("Model")[["Precision", "Recall", "F1"]]
+    )
 
-# --------------------------------------------------
-# Model Performance
-# --------------------------------------------------
-st.markdown("---")
-st.header("📈 Model Performance (Test Dataset)")
-st.dataframe(metrics_df.style.format("{:.3f}"), use_container_width=True)
+    st.markdown("### MCC Comparison")
+    st.bar_chart(
+        metrics_df.set_index("Model")["MCC"]
+    )
 
-# --------------------------------------------------
+# =========================================================
 # Footer
-# --------------------------------------------------
+# =========================================================
 st.markdown("---")
-st.caption("ML Assignment 2 | IEQ Satisfaction Prediction")
+st.caption(
+    "IEQ Satisfaction Prediction • ML Assignment • Streamlit Application"
+)
