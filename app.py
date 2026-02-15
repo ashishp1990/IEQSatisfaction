@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+from pathlib import Path
 
 # --------------------------------------------------
 # Page Configuration
@@ -13,7 +14,7 @@ st.set_page_config(
 )
 
 # --------------------------------------------------
-# Load Trained Artifacts
+# Load Artifacts
 # --------------------------------------------------
 artifact = joblib.load("ieq_models.joblib")
 
@@ -21,10 +22,17 @@ models = artifact["models"]
 scaler = artifact["scaler"]
 metrics_df = artifact["metrics"]
 
-# Exact feature list used during training
 FEATURE_COLUMNS = list(scaler.feature_names_in_)
-
 TARGET_COLUMN = "IEQSatisfaction"
+
+# --------------------------------------------------
+# Load Template & Test Samples
+# --------------------------------------------------
+TEMPLATE_PATH = Path("ieq_full_feature_template.csv")
+TEST_SAMPLE_PATH = Path("ieq_test_samples.csv")
+
+template_df = pd.read_csv(TEMPLATE_PATH)
+template_row = template_df.iloc[0].to_dict()
 
 # --------------------------------------------------
 # Header
@@ -33,7 +41,7 @@ st.markdown(
     """
     <h1 style="text-align:center;">🏫 IEQ Satisfaction Prediction</h1>
     <p style="text-align:center; font-size:16px;">
-    Predict Indoor Environmental Quality satisfaction using full-feature input
+    Full-feature prediction using trained machine learning models
     </p>
     """,
     unsafe_allow_html=True
@@ -55,30 +63,32 @@ model = models[model_name]
 
 input_mode = st.sidebar.radio(
     "Input Mode",
-    ["Manual Input (All Features)", "CSV Upload"]
+    ["Manual Input (Form)", "CSV Upload"]
 )
 
 # --------------------------------------------------
-# Manual Input Mode
+# MANUAL INPUT MODE
 # --------------------------------------------------
-if input_mode == "Manual Input (All Features)":
+if input_mode == "Manual Input (Form)":
     st.header("✍️ Manual Feature Input")
 
-    st.warning(
-        "You must provide values for ALL features used during training. "
-        "IEQSatisfaction is predicted and must NOT be entered."
+    st.info(
+        "All fields are pre-filled with realistic example values. "
+        "You may modify any value before prediction."
     )
 
     input_data = {}
 
     with st.form("manual_input_form"):
         cols = st.columns(3)
+
         for i, col_name in enumerate(FEATURE_COLUMNS):
             with cols[i % 3]:
+                default_value = float(template_row.get(col_name, 0.0))
                 input_data[col_name] = st.number_input(
                     col_name,
-                    value=0.0,
-                    format="%.3f"
+                    value=default_value,
+                    format="%.4f"
                 )
 
         submitted = st.form_submit_button("🔮 Predict IEQ Satisfaction")
@@ -98,28 +108,36 @@ if input_mode == "Manual Input (All Features)":
         )
 
 # --------------------------------------------------
-# CSV Upload Mode
+# CSV UPLOAD MODE
 # --------------------------------------------------
 else:
-    st.header("📂 Upload CSV (All Features)")
+    st.header("📂 Upload CSV (Full Feature Set)")
 
     st.markdown(
         """
-        **CSV Requirements**
+        **CSV Rules**
         - Must contain **all feature columns**
         - Must NOT contain `IEQSatisfaction`
         - Column order does not matter
         """
     )
 
-    # CSV template (FULL FEATURE SET)
-    template_df = pd.DataFrame(columns=FEATURE_COLUMNS)
+    col1, col2 = st.columns(2)
 
-    st.download_button(
-        "⬇️ Download CSV Template",
-        template_df.to_csv(index=False),
-        file_name="ieq_full_feature_template.csv"
-    )
+    with col1:
+        st.download_button(
+            "⬇️ Download CSV Template (With Example Values)",
+            template_df.to_csv(index=False),
+            file_name="ieq_full_feature_template.csv"
+        )
+
+    with col2:
+        if TEST_SAMPLE_PATH.exists():
+            st.download_button(
+                "⬇️ Download Test Samples (From Dataset)",
+                open(TEST_SAMPLE_PATH, "rb"),
+                file_name="ieq_test_samples.csv"
+            )
 
     uploaded = st.file_uploader("Upload CSV file", type=["csv"])
 
@@ -131,9 +149,9 @@ else:
         extra = set(df.columns) - set(FEATURE_COLUMNS)
 
         if missing:
-            st.error(f"Missing columns: {sorted(missing)}")
+            st.error(f"❌ Missing columns: {sorted(missing)}")
         elif extra:
-            st.error(f"Unexpected columns: {sorted(extra)}")
+            st.error(f"❌ Unexpected columns: {sorted(extra)}")
         else:
             X = df[FEATURE_COLUMNS]
             X_scaled = scaler.transform(X)
